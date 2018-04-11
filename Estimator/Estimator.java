@@ -306,10 +306,13 @@ public class Estimator {
 
 
     public Estimator(){
-        packetData = new HashMap<Integer, Long>();
+        
     }
 
     public void run(){
+
+        // <rate, maxBacklog>
+        ArrayList<SimpleEntry<int,int>> maxBacklogsByRate = new ArrayList<SimpleEntry<int,int>>();
 
         int packetSize_byte = 1480;
         int returnPort = 4445;
@@ -323,8 +326,18 @@ public class Estimator {
             System.out.println("UnknownHostException ");
         }
         
+
+        int packetTrainTimeMillis = 2000;
+
         int destPort = 4444;
         int totalPackets = 60000;
+
+            
+        // <sequence number, <send time, receive time>>
+        packetData = new HashMap<Integer, SimpleEntry<Long,Long>>();
+
+
+
 
         ReceiverRunnable receiverRunnable = new ReceiverRunnable(packetData, returnPort, "output.txt");
         Thread receiverThread = new Thread(receiverRunnable);
@@ -343,6 +356,106 @@ public class Estimator {
         
 
         senderThread.start();
+
+
+
+
+        while(!finished){
+            Thread.sleep(10);
+        }
+
+        List<Long> arrivalTimes = new ArrayList<Long>();
+        List<Long> departureTimes = new ArrayList<Long>();
+
+        for (int i = 1; i <= totalPackets; ++i) {
+            SimpleEntry<Long,Long> packetTimes = packetData.get(i);
+
+            Long sendTime = packetTimes.getKey();
+            Long receiveTime = packetTimes.getValue();
+
+            if(receiveTime > 10161519016191){
+                // packet was never received
+            }
+
+            arrivalTimes.add(sendTime);
+            departureTimes.add(receiveTime);
+        }
+
+        arrivalTimes.sort();
+        departureTimes.sort();
+
+
+        // create array for all microsecond between 
+
+        int maxBacklog = 0;
+
+        int[] backlogPerMillisecond = int[packetTrainTimeMillis + 1000];
+        for (int i = 0; i < backlogPerMillisecond.length; ++i) {
+            int totalArrialsBytes = 0;
+            int totalDeparturesBytes = 0;
+
+            for (Long arrivalTimeNano : arrivalTimes) {
+                if(arrivalTimeNano > i * 1000000){
+                    break;
+                }
+                totalArrialsBytes += packetSize_byte;
+            }
+
+
+            for (Long departureTimeNano : departureTimes) {
+                if(departureTimeNano > i * 1000000){
+                    break;
+                }
+                totalDeparturesBytes += packetSize_byte;
+            }
+
+
+            int backlog = totalDeparturesBytes - totalArrialsBytes;
+
+            if(backlog > maxBacklog){
+                maxBacklog = backlog;
+            }
+        }
+
+
+        maxBacklogsByRate.add(new SimpleEntry<int,int>(avgBitRate_kbps, maxBacklog));
+
+
+        int[] serviceCurveByMillis = int[packetTrainTimeMillis + 1000];
+        for (int i = 0; i < serviceCurveByMillis.length; ++i) {
+            serviceCurveByMillis[i] = 0;
+        }
+
+
+
+        boolean hasImproved = false;
+
+        for (int i = 0; i < serviceCurveByMillis.length; ++i) {
+            
+            for (SimpleEntry<int,int> rateBacklog: maxBacklogsByRate) {
+                
+                int serviceCurveValue = rateBacklog.getKey()*i - rateBacklog.getValue();
+
+                if(serviceCurveValue < 0){
+                    continue;
+                    // serviceCurveValue = 0;
+                }
+
+                if(serviceCurveValue > serviceCurveByMillis[i]){
+                    serviceCurveByMillis[i] = serviceCurveValue;
+                    hasImproved = true;
+                }
+            }
+        }
+
+
+        if(hasImproved == false){
+            // DONE
+        }
+
+
+
+
     }
 
 
