@@ -375,6 +375,10 @@ public class Estimator {
         List<Long> departureTimes = new ArrayList<Long>();
 
         for (int i = 1; i <= totalPackets; ++i) {
+            if(!packetData.containsKey(i)){
+                System.out.println("did not contain seq no. "+i);
+                continue;
+            }
             SimpleEntry<Long,Long> packetTimes = packetData.get(i);
 
             Long sendTime = packetTimes.getKey() - firstSendTimeNano;
@@ -467,7 +471,7 @@ public class Estimator {
         // <rate, maxBacklog>
         ArrayList<SimpleEntry<Integer,Integer>> maxBacklogsByRate = new ArrayList<SimpleEntry<Integer,Integer>>();
 
-        int packetSize_byte = 1480;
+        int packetSize_byte = 100;
         int returnPort = 4445;
 
         InetAddress destAddr = null;
@@ -490,9 +494,11 @@ public class Estimator {
         int avgBitRate_kbps = 10;
 
         int count = 0;
+
         while(true){
 
 
+            totalPackets = (avgBitRate_kbps*1000/(8*packetSize_byte))*2;
 
             HashMap<Integer, SimpleEntry<Long,Long>> packetData = runRunnables(packetSize_byte, returnPort, avgBitRate_kbps, destAddr, destPort, totalPackets);
         
@@ -503,6 +509,8 @@ public class Estimator {
             count++;
 
             avgBitRate_kbps+=10;
+
+            returnPort++;
         }
 
         
