@@ -37,7 +37,7 @@ public class BlackBox implements Runnable
 		 * Long-term transmission rate.
 		 * Value of -1 is equal to infinity.
 		 */
-		double RConstant = -1;
+		double RConstant = 0.2;
 		/**
 		 * Constant traffic delay (in micro seconds).
 		 */
@@ -57,7 +57,7 @@ public class BlackBox implements Runnable
 		
 		// max packet size is 1480 bytes
 		// buffer capacity is 10000*1480 bytes
-		BlackBox bb = new BlackBox(portNumber, 1480, 10000*1480, bConstant, RConstant, TConstant);
+		BlackBox bb = new BlackBox(portNumber, 1480, 1000*1480, bConstant, RConstant, TConstant);
 		new Thread(bb).start();
 		System.out.println("Starting BlackBox. Listening on port " + portNumber);
 	}
