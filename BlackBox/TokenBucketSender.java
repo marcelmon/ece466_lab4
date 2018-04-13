@@ -12,6 +12,16 @@ import java.net.SocketException;
  */
 public class TokenBucketSender implements Runnable
 {	
+
+
+	public void busyWaitNanos(long nanos){
+        long waitUntil = System.nanoTime() + nanos;
+        while(waitUntil > System.nanoTime()){
+            ;
+        }
+    }
+
+
 	/**
 	 * Indicates if TokenBucketSender is currently sending.
 	 */
@@ -124,31 +134,36 @@ public class TokenBucketSender implements Runnable
 					{
 						// get how many nanoseconds before there are enough tokens to send packet
 						long timeToWait = bucket.getWaitingTime(packet.getLength()*8);
-						try
-						{
-							// sleep until there are enough tokens
-							Thread.sleep(timeToWait/1000000, (int)(timeToWait%1000000));
-						} 
-						catch (InterruptedException e)
-						{
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
+
+
+						busyWaitNanos(timeToWait);
+						// try
+						// {
+						// 	// sleep until there are enough tokens
+						// 	Thread.sleep(timeToWait/1000000, (int)(timeToWait%1000000));
+						// } 
+						// catch (InterruptedException e)
+						// {
+						// 	// TODO Auto-generated catch block
+						// 	e.printStackTrace();
+						// }
 					}
 				}
 				else
 				{
+
+					busyWaitNanos(waitTime);
 					// wait until departure time of first packet
-					try
-					{
-						// sleep until there are enough tokens
-						Thread.sleep(waitTime/1000000, (int)(waitTime%1000000));
-					} 
-					catch (InterruptedException e)
-					{
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
+					// try
+					// {
+					// 	// sleep until there are enough tokens
+					// 	Thread.sleep(waitTime/1000000, (int)(waitTime%1000000));
+					// } 
+					// catch (InterruptedException e)
+					// {
+					// 	// TODO Auto-generated catch block
+					// 	e.printStackTrace();
+					// }
 				}
 			}
 			// there are no packets in buffer to send. Wait for one to arrive to buffer.

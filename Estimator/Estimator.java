@@ -267,7 +267,7 @@ public class Estimator {
             DatagramPacket packet = buildPacket(destAddr, destPort, buff, returnPort, currentPacketNum);
             
             long firstPacketSendTime = 0;
-            while(currentPacketNum < totalPackets){
+            while(currentPacketNum <= totalPackets){
 
                 if(firstPacketSendTime == 0){
                     firstPacketSendTime = System.nanoTime();                                          
@@ -279,7 +279,7 @@ public class Estimator {
                 
                 try{
                     socket.send(packet);
-                    System.out.println("pack addr : " + packet.getAddress().getHostAddress() + " pack port : " + packet.getPort());
+                    // System.out.println("pack addr : " + packet.getAddress().getHostAddress() + " pack port : " + packet.getPort());
                 }
                 catch(IOException e){
                     System.out.println("caught socket io in SenderRunnable : " + e.getMessage());
@@ -349,7 +349,7 @@ public class Estimator {
 
         try{
             senderThread.join();
-            Thread.sleep(2000);
+            Thread.sleep(15000);
         }
         
         catch(InterruptedException e){
@@ -400,28 +400,28 @@ public class Estimator {
 
         int maxBacklog = 0;
 
-        int[] backlogPerMillisecond = new int[packetTrainTimeMillis + 1000];
+        int[] backlogPerMillisecond = new int[packetTrainTimeMillis];
         for (int i = 0; i < backlogPerMillisecond.length; ++i) {
-            int totalArrialsBytes = 0;
-            int totalDeparturesBytes = 0;
+            int totalArrialsBits = 0;
+            int totalDeparturesBits = 0;
 
             for (Long arrivalTimeNano : arrivalTimes) {
-                if(arrivalTimeNano > i * 1000000){
-                    break;
+                if(arrivalTimeNano < i * 1000000){
+                    totalArrialsBits += packetSize_byte*8;
                 }
-                totalArrialsBytes += packetSize_byte;
+                
             }
 
 
             for (Long departureTimeNano : departureTimes) {
-                if(departureTimeNano > i * 1000000){
-                    break;
+                if(departureTimeNano < i * 1000000){
+                    totalDeparturesBits += packetSize_byte*8;
                 }
-                totalDeparturesBytes += packetSize_byte;
+                
             }
 
 
-            int backlog = totalDeparturesBytes - totalArrialsBytes;
+            int backlog = totalArrialsBits - totalDeparturesBits;
 
             if(backlog > maxBacklog){
                 maxBacklog = backlog;
@@ -432,7 +432,7 @@ public class Estimator {
         maxBacklogsByRate.add(new SimpleEntry<Integer,Integer>(avgBitRate_kbps, maxBacklog));
 
 
-        int[] serviceCurveByMillis = new int[packetTrainTimeMillis + 1000];
+        int[] serviceCurveByMillis = new int[packetTrainTimeMillis];
         for (int i = 0; i < serviceCurveByMillis.length; ++i) {
             serviceCurveByMillis[i] = 0;
         }
@@ -471,7 +471,7 @@ public class Estimator {
         // <rate, maxBacklog>
         ArrayList<SimpleEntry<Integer,Integer>> maxBacklogsByRate = new ArrayList<SimpleEntry<Integer,Integer>>();
 
-        int packetSize_byte = 100;
+        int packetSize_byte = 1000;
         int returnPort = 4445;
 
         InetAddress destAddr = null;
@@ -486,29 +486,92 @@ public class Estimator {
 
         int packetTrainTimeMillis = 2000;
 
+
+        double totalSeconds = (double) packetTrainTimeMillis / (double) 1000;
+
+
+        int bitsPerPacket = 8*packetSize_byte;
+
+
         int destPort = 4444;
-        int totalPackets = 60000;
+        // int totalPackets = 60000;
 
 
 
-        int avgBitRate_kbps = 10;
+        int avgBitRate_kbps = 700;
 
         int count = 0;
+
+
+        int[] serviceCurveByMillis = new int[packetTrainTimeMillis];
+        for (int i = 0; i < serviceCurveByMillis.length; ++i) {
+            serviceCurveByMillis[i] = 0;
+        }
+
+        int currentIndex = 0 ;
 
         while(true){
 
 
-            totalPackets = (avgBitRate_kbps*1000/(8*packetSize_byte))*2;
+            int bitsPerSecond = avgBitRate_kbps*1000;
+
+            double packetsPerSecond = (double) bitsPerSecond / (double) bitsPerPacket;
+
+            int totalPackets = (new Double(packetsPerSecond*totalSeconds)).intValue();
+
+            System.out.println("Current kbps : " + avgBitRate_kbps);
 
             HashMap<Integer, SimpleEntry<Long,Long>> packetData = runRunnables(packetSize_byte, returnPort, avgBitRate_kbps, destAddr, destPort, totalPackets);
         
             SimpleEntry<int[], Boolean> ret = processPacketData(maxBacklogsByRate, packetData, totalPackets, packetTrainTimeMillis, packetSize_byte, avgBitRate_kbps);
-            if(count > 0 && ret.getValue() == false){
-                System.out.println("DONE!");
-            }
-            count++;
+            ArrayList<Integer> betterI = new ArrayList<Integer>();
 
-            avgBitRate_kbps+=10;
+            boolean stillGreater = false;
+            int totalGreater = 0;
+            if(currentIndex == 0){
+                serviceCurveByMillis = ret.getKey();
+            }
+
+            else{
+                for (int i = 0; i < serviceCurveByMillis.length; ++i) {
+                    if(ret.getKey()[i] > serviceCurveByMillis[i]){
+                        // still greater
+                        stillGreater = true;
+                        betterI.add(i);
+                        totalGreater++;
+                    }
+                }
+                if(stillGreater == false){
+                     System.out.println("DONE!");
+                    System.exit(1);
+                }
+                else{
+                   serviceCurveByMillis = ret.getKey(); 
+                   System.out.println("totalGreater " + totalGreater);
+                }
+                // for(Integer i : betterI){
+                //     System.out.print(" "+i);
+                // }
+            }
+
+            try{
+                FileOutputStream fout =  new FileOutputStream("serviceCurveValues_max_test_rate_"+avgBitRate_kbps+"_kbps.txt");
+                PrintStream pout = new PrintStream (fout);
+                for (int i = 0; i < serviceCurveByMillis.length; ++i) {
+                    pout.println(i + "\t" + serviceCurveByMillis[i]);
+                }
+            }
+            catch(IOException e){
+                System.out.println("caught io in ReceiverRunnable : " + e.getMessage());
+            }
+
+            
+            // if(count > 0 && ret.getValue() == false){
+               
+            // }
+            currentIndex++;
+
+            avgBitRate_kbps+=100;
 
             returnPort++;
         }

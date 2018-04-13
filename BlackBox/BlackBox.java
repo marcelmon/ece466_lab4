@@ -37,7 +37,7 @@ public class BlackBox implements Runnable
 		 * Long-term transmission rate.
 		 * Value of -1 is equal to infinity.
 		 */
-		double RConstant = -1;
+		double RConstant = 1;
 		/**
 		 * Constant traffic delay (in micro seconds).
 		 */
