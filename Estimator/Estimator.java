@@ -1,4 +1,13 @@
+/*
 
+
+The entry point for the estimator is Estimator::run() on line 502. Please see the comments above the main while loop at line 546.
+
+
+Two other classes are included in this file, SenderRunnable and ReceiverRunnable action as traffic source and sink.
+
+
+*/
 import java.io.*;
 import java.net.*;
 
@@ -56,6 +65,9 @@ public class Estimator {
 
 
 
+
+    // the receiver runnable will record packet receive times (in nano second) to the packetData hash map
+    // it also prints out the send and receive times to file when a packet arrives
     public class ReceiverRunnable implements Runnable {
 
 
@@ -169,6 +181,9 @@ public class Estimator {
 
 
 
+    // the sender runnable class will take as parameter the packetsize, dest info, return port to use, avg bit rate, and total packets to send
+    // it will record the send times indexed by sequence number in the packetData object
+
     public class SenderRunnable implements Runnable{
 
 
@@ -189,7 +204,7 @@ public class Estimator {
         public ReceiverRunnable receiverRunnable;
 
 
-
+        // spin-wait used instead of thread.sleep for better time granularity
         public void busyWaitNanos(long nanos){
             long waitUntil = System.nanoTime() + nanos;
             while(waitUntil > System.nanoTime()){
@@ -267,10 +282,14 @@ public class Estimator {
             DatagramPacket packet = buildPacket(destAddr, destPort, buff, returnPort, currentPacketNum);
             
             long firstPacketSendTime = 0;
+
+            // will send a packet until the totalPackets is reached
             while(currentPacketNum <= totalPackets){
 
                 if(firstPacketSendTime == 0){
-                    firstPacketSendTime = System.nanoTime();                                          
+                    firstPacketSendTime = System.nanoTime();           
+
+                    //     packetData will contain the send and receive times indexed by seq id                          
                     packetData.put(currentPacketNum, new SimpleEntry<Long, Long>(firstPacketSendTime, 99999999999999999L));
                 }
                 else{
@@ -291,9 +310,13 @@ public class Estimator {
 
                 nextPacketSendTime = firstPacketSendTime + (nanoSecPacketSpacing*currentPacketNum);
                 currentPacketNum++;
+
+                // build packet used to create a packet containing the seq number and return port
                 packet = buildPacket(destAddr, destPort, buff, returnPort, currentPacketNum);
 
                 long waitTimeNano = nextPacketSendTime - System.nanoTime();
+
+                // wait until packet is ready to send
                 if(waitTimeNano > 0){
                     busyWaitNanos(waitTimeNano);
                 }
@@ -317,6 +340,7 @@ public class Estimator {
     }
 
 
+    // this function will run the sender and receiver and return the send and receive times of each packet
     public HashMap<Integer, SimpleEntry<Long,Long>> runRunnables(
         int packetSize_byte, 
         int returnPort, 
@@ -348,15 +372,18 @@ public class Estimator {
         senderThread.start();
 
         try{
+            // ensure that all packets are sent
             senderThread.join();
-            Thread.sleep(15000);
+
+            // give some time to ensure there are no packets remaining in the blackbox buffer
+            Thread.sleep(5000);
         }
         
         catch(InterruptedException e){
 
         }
         
-
+        // force the receive to stop
         receiverThread.stop();
 
 
@@ -365,7 +392,9 @@ public class Estimator {
     }
 
 
-
+    // process packet data takes as arguments the packetData object containing all send and receive times for each packet, as well as the previously recorded max backlogs
+    // it is responsible for calulating the new max backlog for this iteration (using packetData)
+    //      and for each milliscond of the packet train time, it will find the max(rt- Bmax) val used in service curve estimation
     public SimpleEntry<int[], Boolean> processPacketData(ArrayList<SimpleEntry<Integer,Integer>> maxBacklogsByRate, HashMap<Integer, SimpleEntry<Long,Long>> packetData, int totalPackets, int packetTrainTimeMillis, int packetSize_byte, int avgBitRate_kbps){
 
 
@@ -374,6 +403,8 @@ public class Estimator {
         List<Long> arrivalTimes = new ArrayList<Long>();
         List<Long> departureTimes = new ArrayList<Long>();
 
+
+        // the sendTime (arrival time) and receive times (departure times) of each packet are extracted from the packetData object
         for (int i = 1; i <= totalPackets; ++i) {
             if(!packetData.containsKey(i)){
                 System.out.println("did not contain seq no. "+i);
@@ -400,6 +431,10 @@ public class Estimator {
 
         int maxBacklog = 0;
 
+
+        
+        // and for each millisecond the backlog is calculated by summing all arrivals and subtracting from that the sum of all departures
+        // then the max backlog from the entire packet train is determined and writen to maxBacklog
         int[] backlogPerMillisecond = new int[packetTrainTimeMillis];
         for (int i = 0; i < backlogPerMillisecond.length; ++i) {
             int totalArrialsBits = 0;
@@ -428,21 +463,25 @@ public class Estimator {
             }
         }
 
-
         maxBacklogsByRate.add(new SimpleEntry<Integer,Integer>(avgBitRate_kbps, maxBacklog));
 
 
+        // a new service curve for this iteration is initialized
         int[] serviceCurveByMillis = new int[packetTrainTimeMillis];
         for (int i = 0; i < serviceCurveByMillis.length; ++i) {
             serviceCurveByMillis[i] = 0;
         }
 
 
-
+        // no longer used
         boolean hasImproved = false;
+
+
+
 
         for (int i = 0; i < serviceCurveByMillis.length; ++i) {
             
+            // iterate through each previously recorded rate->max backlog and calculate the service curve at time i (ms) use rt- Bmax
             for (SimpleEntry<Integer,Integer> rateBacklog: maxBacklogsByRate) {
                 
                 int serviceCurveValue = rateBacklog.getKey()*i - rateBacklog.getValue();
@@ -452,6 +491,7 @@ public class Estimator {
                     // serviceCurveValue = 0;
                 }
 
+                // the service curve value at this milliscond is added only if it is an improvement
                 if(serviceCurveValue > serviceCurveByMillis[i]){
                     serviceCurveByMillis[i] = serviceCurveValue;
                     hasImproved = true;
@@ -459,6 +499,8 @@ public class Estimator {
             }
         }
 
+
+        // return serviceCurveByMillis, hasImproved is no longer used as this is determined outside this function
         SimpleEntry<int[], Boolean> ret = new SimpleEntry<int[], Boolean>(serviceCurveByMillis, hasImproved);
         return ret;
 
@@ -494,7 +536,6 @@ public class Estimator {
 
 
         int destPort = 4444;
-        // int totalPackets = 60000;
 
 
 
@@ -510,6 +551,16 @@ public class Estimator {
 
         int currentIndex = 0 ;
 
+
+        // this is the outside loop for each iteration of the esimator
+        // the first rate selected is that which is set in avgBitRate_kbps above
+        // each iteration will start by calling runRunnables() 
+        //      which will start a send and receive thread, and send a packet train the the blackbox
+        //      and keep a record of the send and receive times, returning the hashmap that stores these values
+        // next the processPacketData() function is called to build the service curve estimate for this iteration
+        // the final step in each loop iteration is to compare the new estimate returned from processPacketData() 
+        //      against the previous service cureve stored in serviceCurveByMillis
+        // if there is any imprvoment then the serviceCurveByMillis is set to the new estimate
         while(true){
 
 
@@ -521,18 +572,28 @@ public class Estimator {
 
             System.out.println("Current kbps : " + avgBitRate_kbps);
 
+
+            // start the send and receive threads and return a hashmap containing : <seq num ,  <send time nano, receive time nano>>
             HashMap<Integer, SimpleEntry<Long,Long>> packetData = runRunnables(packetSize_byte, returnPort, avgBitRate_kbps, destAddr, destPort, totalPackets);
         
+
+            // build a new service curve estimate for the particular estimator rate used in this iteration
+            // will also store the calculated max backlog for this rate in maxBacklogsByRate
+            // note : the boolean return is not used
             SimpleEntry<int[], Boolean> ret = processPacketData(maxBacklogsByRate, packetData, totalPackets, packetTrainTimeMillis, packetSize_byte, avgBitRate_kbps);
             ArrayList<Integer> betterI = new ArrayList<Integer>();
 
             boolean stillGreater = false;
             int totalGreater = 0;
+
+            // is the first iteration, thus there is no previous estimate to compare, set the current service curve estimate
             if(currentIndex == 0){
                 serviceCurveByMillis = ret.getKey();
             }
 
             else{
+
+                // iterate through each millisecond of the previous service curve estimate and compare it against the estimate used in this iteration
                 for (int i = 0; i < serviceCurveByMillis.length; ++i) {
                     if(ret.getKey()[i] > serviceCurveByMillis[i]){
                         // still greater
@@ -541,6 +602,8 @@ public class Estimator {
                         totalGreater++;
                     }
                 }
+
+                // if none of the values of the new service curve estimate were better than the previous, we are done
                 if(stillGreater == false){
                      System.out.println("DONE!");
                     System.exit(1);
@@ -555,6 +618,7 @@ public class Estimator {
             }
 
             try{
+                // output the value for the current service curve estimate to file (do not perform this step if the estimate wasn't better)
                 FileOutputStream fout =  new FileOutputStream("serviceCurveValues_max_test_rate_"+avgBitRate_kbps+"_kbps.txt");
                 PrintStream pout = new PrintStream (fout);
                 for (int i = 0; i < serviceCurveByMillis.length; ++i) {
@@ -566,11 +630,10 @@ public class Estimator {
             }
 
             
-            // if(count > 0 && ret.getValue() == false){
-               
-            // }
             currentIndex++;
 
+
+            // increment the estimator rate
             avgBitRate_kbps+=100;
 
             returnPort++;
@@ -579,125 +642,6 @@ public class Estimator {
         
 
             
-        // // <sequence number, <send time, receive time>>
-        // packetData = new HashMap<Integer, SimpleEntry<Long,Long>>();
-
-
-
-
-        // ReceiverRunnable receiverRunnable = new ReceiverRunnable(packetData, returnPort, "output.txt");
-        // Thread receiverThread = new Thread(receiverRunnable);
-
-        // SenderRunnable senderRunnable = new SenderRunnable(packetData, packetSize_byte, returnPort, avgBitRate_kbps, destAddr, destPort, totalPackets);
-        // Thread senderThread = new Thread(senderRunnable);
-        
-
-        // receiverThread.start();
-
-        // try{
-        //     Thread.sleep(1000);
-        // } catch(InterruptedException e){
-        //      System.out.println("InterruptedException ");
-        // }
-        
-
-        // senderThread.start();
-
-        // senderThread.join();
-
-        // Thread.sleep(2000);
-
-        // receiverThread.stop();
-
-
-        // List<Long> arrivalTimes = new ArrayList<Long>();
-        // List<Long> departureTimes = new ArrayList<Long>();
-
-        // for (int i = 1; i <= totalPackets; ++i) {
-        //     SimpleEntry<Long,Long> packetTimes = packetData.get(i);
-
-        //     Long sendTime = packetTimes.getKey();
-        //     Long receiveTime = packetTimes.getValue();
-
-        //     if(receiveTime > 10161519016191){
-        //         // packet was never received
-        //     }
-
-        //     arrivalTimes.add(sendTime);
-        //     departureTimes.add(receiveTime);
-        // }
-
-        // arrivalTimes.sort();
-        // departureTimes.sort();
-
-
-        // // create array for all microsecond between 
-
-        // int maxBacklog = 0;
-
-        // int[] backlogPerMillisecond = int[packetTrainTimeMillis + 1000];
-        // for (int i = 0; i < backlogPerMillisecond.length; ++i) {
-        //     int totalArrialsBytes = 0;
-        //     int totalDeparturesBytes = 0;
-
-        //     for (Long arrivalTimeNano : arrivalTimes) {
-        //         if(arrivalTimeNano > i * 1000000){
-        //             break;
-        //         }
-        //         totalArrialsBytes += packetSize_byte;
-        //     }
-
-
-        //     for (Long departureTimeNano : departureTimes) {
-        //         if(departureTimeNano > i * 1000000){
-        //             break;
-        //         }
-        //         totalDeparturesBytes += packetSize_byte;
-        //     }
-
-
-        //     int backlog = totalDeparturesBytes - totalArrialsBytes;
-
-        //     if(backlog > maxBacklog){
-        //         maxBacklog = backlog;
-        //     }
-        // }
-
-
-        // maxBacklogsByRate.add(new SimpleEntry<int,int>(avgBitRate_kbps, maxBacklog));
-
-
-        // int[] serviceCurveByMillis = int[packetTrainTimeMillis + 1000];
-        // for (int i = 0; i < serviceCurveByMillis.length; ++i) {
-        //     serviceCurveByMillis[i] = 0;
-        // }
-
-
-
-        // boolean hasImproved = false;
-
-        // for (int i = 0; i < serviceCurveByMillis.length; ++i) {
-            
-        //     for (SimpleEntry<int,int> rateBacklog: maxBacklogsByRate) {
-                
-        //         int serviceCurveValue = rateBacklog.getKey()*i - rateBacklog.getValue();
-
-        //         if(serviceCurveValue < 0){
-        //             continue;
-        //             // serviceCurveValue = 0;
-        //         }
-
-        //         if(serviceCurveValue > serviceCurveByMillis[i]){
-        //             serviceCurveByMillis[i] = serviceCurveValue;
-        //             hasImproved = true;
-        //         }
-        //     }
-        // }
-
-
-        // if(hasImproved == false){
-        //     // DONE
-        // }
 
 
 
